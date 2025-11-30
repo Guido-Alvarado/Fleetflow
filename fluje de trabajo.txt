@@ -1,0 +1,54 @@
+Prompt Maestro: Sistema de Gestión Logística PWA (React + Firebase)Nombre del Proyecto: FleetFlow. Contexto y ObjetivoActuar como un Ingeniero de Software Senior experto en React y Firebase. El objetivo es desarrollar una PWA (Progressive Web App) para una empresa de logística. El sistema permite a los administradores gestionar flotas/choferes y crear rutas, y a los choferes gestionar sus entregas desde el móvil.Prioridad Crítica: Optimización de costos en Firestore.Estrategia: Uso agresivo de Arrays de Objetos y Maps dentro de los documentos para minimizar las operaciones de lectura (Reads). Evitar subcolecciones para datos que se consultan siempre juntos (ej: Detalles de un reparto).2. Tech Stack & ConfiguraciónFrontend: React (Vite), TypeScript (opcional, preferible JS fuerte si se requiere velocidad), Tailwind CSS.Backend/DB: Firebase V9 (Firestore, Auth).PWA: vite-plugin-pwa para capacidades offline y "Instalar en pantalla de inicio".Iconos: Lucide-React o Heroicons.Estado: React Context API (para Auth y Datos Maestros).3. Modelo de Datos Optimizado (Firestore Schema)Regla de Oro: Un documento de repartos debe contener TODA la información necesaria para pintar la pantalla del chofer en 1 sola lectura.A. Colecciones Maestras (Datos estáticos/poco cambio)choferes: { id, nombre, dni, activo (bool), ... }flota: { id, marca, patente, kilometraje (number), activo (bool) }clientes: { id, razon_social, direccion, zona_id, ... }zonas: { id, nombre }conceptos_gastos: { id, nombre (Combustible, Peaje, Comida) }B. Colección Core: repartos (Documento Pesado)En lugar de subcolecciones, usaremos Arrays.Estructura del Documento repartos/{id}:{
+  "id": "auto-generated-id",
+  "numero_legible": 1024,
+  "fecha_creacion": "Timestamp",
+  "estado_global": "EN_CURSO", // PENDIENTE, EN_CURSO, FINALIZADO
+  
+  // Datos denormalizados (Copia estática para reducir lecturas de cruce)
+  "chofer": {
+    "id": "ref_id",
+    "nombre": "Juan Perez"
+  },
+  "flota": {
+    "id": "ref_id",
+    "patente": "AB-123-CD",
+    "kilometraje_inicial": 50000
+  },
+  
+  // ARRAY PRINCIPAL (Evita subcolección 'detalles')
+  "items_entrega": [
+    {
+      "id": "uuid-v4", // ID único interno del array
+      "cliente_nombre": "Kiosco Pepe",
+      "cliente_direccion": "Av. Siempre Viva 123",
+      "factura_numero": "A-0001",
+      "importe": 1500.50,
+      "estado": "PENDIENTE", // PENDIENTE, ENTREGADO, NO_ENTREGADO
+      "motivo_fallo": "", // Opcional
+      "hora_visita": null, // Se llena al marcar estado
+      "geolocalizacion": { "lat": 0, "lng": 0 } // Opcional
+    },
+    { ... }
+  ],
+
+  // ARRAY SECUNDARIO (Evita subcolección 'gastos')
+  "gastos_ruta": [
+    {
+      "id": "uuid-v4",
+      "concepto": "Combustible",
+      "monto": 5000,
+      "km_registrado": 50100, // Para lógica de actualización de flota
+      "foto_url": "..." 
+    }
+  ],
+
+  // Totales Calculados (Para evitar reduce() en cliente masivo)
+  "balance": {
+    "total_a_cobrar": 15000, // Suma de items_entrega
+    "total_gastado": 5000,   // Suma de gastos_ruta
+    "total_rendido": 10000   // Diferencia
+  }
+}
+
+
+4. Requerimientos Funcionales y UIA. Diseño Responsivo & UXDesktop (Admin): Layout con Sidebar lateral. Tablas densas con filtros.Mobile (Chofer):Botones grandes (44px min touch target).Evitar modales complejos, usar "Drawers" (paneles deslizantes desde abajo) para detalles.Feedback visual inmediato al marcar una entrega (Toast success).B. Módulos y Componentes Reutilizables1. Módulo Admin (Creación de Repartos)RepartoBuilder: Un componente complejo.Header: Selectores para Chofer, Vehículo, Fecha.Body: Una tabla dinámica donde se agregan filas (Entregas).Logic: Al seleccionar un Cliente de un dropdown, autocompletar dirección y zona.Calculadora: Un useEffect que sume automáticamente el array items_entrega y actualice el estado local total_a_cobrar antes de guardar en Firebase.2. Módulo Chofer (Ejecución)RouteList: Muestra tarjetas (DeliveryCard) ordenadas.DeliveryCard:Muestra: Nombre Cliente, Dirección (link a Google Maps), Monto.Acciones: Botones deslizables o grandes "ENTREGADO" (Verde) / "NO ENTREGADO" (Rojo).ExpenseFab: Botón flotante (+) para agregar un gasto rápido (Foto + Monto + Km).5. Instrucciones de Implementación (Paso a Paso)Paso 1: Servicios de Firebase (Optimized)Crear src/services/repartos.js.getRepartosByChofer(choferId): Query simple where('chofer.id', '==', choferId). Trae TODO el objeto.updateItemStatus(repartoId, itemId, newStatus):Advertencia: No usar arrayUnion/arrayRemove para actualizar propiedades de un objeto dentro de un array.Estrategia: Leer documento -> Clonar array items_entrega en memoria -> Buscar index por ID -> Modificar -> updateDoc(ref, { items_entrega: newArray }).Nota: Aunque implica lectura+escritura, es seguro y mantiene la estructura de costo bajo (1 Read, 1 Write) comparado con transacciones complejas.Paso 2: Desarrollo de VistasLayout: MainLayout con Navbar responsive.Dashboard Admin: Cards con KPI simples (Repartos activos hoy).Vista Chofer: Enfocarse en CSS touch-action-manipulation para evitar zoom en doble tap y mejorar respuesta.Paso 3: PWAConfigurar vite.config.js con el plugin PWA.Incluir assets en public/ (logos 192x192, 512x512).Estrategia de caché: NetworkFirst para datos de la ruta (queremos datos frescos), CacheFirst para assets (imágenes, fuentes).6. Reglas de Negocio EspecíficasActualización de Kilometraje:Si se agrega un gasto tipo "Combustible", se debe leer el input "Kilometraje actual".Al guardar el reparto, disparar una función (o hacerlo en el mismo flujo del cliente si no hay Cloud Functions) que actualice flota/{id_vehiculo} con el nuevo km.Inmutabilidad:Los selectores de Chofer/Cliente deben filtrar por activo == true.Pero los reportes históricos deben mostrar el nombre del chofer aunque esté inactivo (por eso guardamos copia del nombre en el objeto reparto).7. Automatización: Script de Datos Semilla (Seeding)Es vital incluir un script para poblar la base de datos y facilitar el desarrollo inicial.Crear un archivo src/utils/seedDatabase.js (o .ts) que contenga una función seedInitialData() exportable. Esta función debe:Verificar seguridad: Solo ejecutarse si el usuario logueado es admin o si estamos en entorno development (import.meta.env.DEV).Limpiar (Opcional): Una bandera para borrar colecciones previas si se requiere resetear (usar con precaución).Generar Datos Maestros:Zonas: Crear "Zona Norte", "Zona Sur", "Centro". Guardar los IDs generados.Choferes: Crear 3 choferes ficticios (ej: "Juan Pérez", "Carlos Gómez").Flota: Crear 3 vehículos (ej: Camión Iveco, Sprinter, Camioneta).Clientes: Crear 10 clientes ficticios, asignándoles aleatoriamente una de las Zonas creadas arriba.Conceptos Gasto: "Combustible", "Viáticos", "Mantenimiento".Generar Repartos de Prueba:Crear 2 repartos activos para la fecha actual.Asignar aleatoriamente un chofer y un vehículo.Dentro de cada reparto, generar un array items_entrega con 3 a 5 clientes aleatorios de la colección creada.UI Trigger: Agregar un botón temporal "Cargar Datos de Prueba" en el Dashboard o en la pantalla de Configuración, visible solo en modo desarrollo, que invoque esta función.8. Entregable EsperadoCódigo fuente completo con:Configuración de Firebase en src/firebase/config.js.Contexto de Autenticación (AuthContext).Hooks personalizados (useRepartos, useForm).Script de Seeding funcional (src/utils/seedDatabase.js).Estilos con Tailwind (utilizar clases dark: para soporte modo oscuro futuro si aplica, priorizar contraste alto para choferes bajo el sol).Fin del Prompt.
